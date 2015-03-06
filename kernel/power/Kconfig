@@ -331,3 +331,10 @@ config HTC_PNPMGR
 	  depends on PM
 	  ---help---
 	  Collect the sysfs files nodes for pnpmgr usage.
+
+config SUSPEND_TIME_TIMEKEEPING
+	bool "get suspend time from timekeeping"
+	default y if SUSPEND_TIME
+	---help---
+	  Get the suspend time in suspend from timekeeping for the archs
+	  that don't support persistent clock.
