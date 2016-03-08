@@ -14,6 +14,9 @@
 struct rq;
 extern const char *task_event_names[];
 
+/*
+ * Tracepoint for calling kthread_stop, performed to end a kthread:
+ */
 TRACE_EVENT(sched_kthread_stop,
 
 	TP_PROTO(struct task_struct *t),
@@ -33,6 +36,9 @@ TRACE_EVENT(sched_kthread_stop,
 	TP_printk("comm=%s pid=%d", __entry->comm, __entry->pid)
 );
 
+/*
+ * Tracepoint for the return value of the kthread stopping:
+ */
 TRACE_EVENT(sched_kthread_stop_ret,
 
 	TP_PROTO(int ret),
@@ -50,6 +56,9 @@ TRACE_EVENT(sched_kthread_stop_ret,
 	TP_printk("ret=%d", __entry->ret)
 );
 
+/*
+ * Tracepoint for task enqueue/dequeue:
+ */
 TRACE_EVENT(sched_enq_deq_task,
 
 	TP_PROTO(struct task_struct *p, bool enqueue, unsigned int cpus_allowed),
@@ -197,7 +206,6 @@ DECLARE_EVENT_CLASS(sched_cpu_load,
 		__field(unsigned int, capacity			)
 		__field(	 u64, cumulative_runnable_avg	)
 		__field(	 u64, irqload			)
-		__field(unsigned int, cur_freq			)
 		__field(unsigned int, max_freq			)
 		__field(unsigned int, power_cost		)
 		__field(	 int, cstate			)
@@ -214,7 +222,6 @@ DECLARE_EVENT_CLASS(sched_cpu_load,
 		__entry->capacity		= cpu_capacity(rq->cpu);
 		__entry->cumulative_runnable_avg = rq->hmp_stats.cumulative_runnable_avg;
 		__entry->irqload		= irqload;
-		__entry->cur_freq		= cpu_cur_freq(rq->cpu);
 		__entry->max_freq		= cpu_max_freq(rq->cpu);
 		__entry->power_cost		= power_cost;
 		__entry->cstate			= rq->cstate;
@@ -222,10 +229,10 @@ DECLARE_EVENT_CLASS(sched_cpu_load,
 		__entry->temp			= temp;
 	),
 
-	TP_printk("cpu %u idle %d nr_run %u nr_big %u lsf %u capacity %u cr_avg %llu irqload %llu fcur %u fmax %u power_cost %u cstate %d dstate %d temp %d",
+	TP_printk("cpu %u idle %d nr_run %u nr_big %u lsf %u capacity %u cr_avg %llu irqload %llu fmax %u power_cost %u cstate %d dstate %d temp %d",
 	__entry->cpu, __entry->idle, __entry->nr_running, __entry->nr_big_tasks,
 	__entry->load_scale_factor, __entry->capacity,
-	__entry->cumulative_runnable_avg, __entry->irqload, __entry->cur_freq,
+	__entry->cumulative_runnable_avg, __entry->irqload,
 	__entry->max_freq, __entry->power_cost, __entry->cstate,
 	__entry->dstate, __entry->temp)
 );
@@ -265,9 +272,9 @@ TRACE_EVENT(sched_set_boost,
 TRACE_EVENT(sched_update_task_ravg,
 
 	TP_PROTO(struct task_struct *p, struct rq *rq, enum task_event evt,
-						u64 wallclock, u64 irqtime),
+		 u64 wallclock, u64 irqtime, u32 cycles, u32 exec_time),
 
-	TP_ARGS(p, rq, evt, wallclock, irqtime),
+	TP_ARGS(p, rq, evt, wallclock, irqtime, cycles, exec_time),
 
 	TP_STRUCT__entry(
 		__array(	char,	comm,   TASK_COMM_LEN	)
@@ -303,7 +310,8 @@ TRACE_EVENT(sched_update_task_ravg,
 		__entry->evt            = evt;
 		__entry->cpu            = rq->cpu;
 		__entry->cur_pid        = rq->curr->pid;
-		__entry->cur_freq       = cpu_cur_freq(rq->cpu);
+		__entry->cur_freq       = cpu_cycles_to_freq(rq->cpu, cycles,
+							     exec_time);
 		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
 		__entry->pid            = p->pid;
 		__entry->mark_start     = p->ravg.mark_start;
@@ -557,10 +565,13 @@ TRACE_EVENT(sched_freq_alert,
 		 __entry->new_pred)
 );
 
-#endif	
+#endif	/* CONFIG_SCHED_FREQ_INPUT */
 
-#endif	
+#endif	/* CONFIG_SCHED_HMP */
 
+/*
+ * Tracepoint for waking up a task:
+ */
 DECLARE_EVENT_CLASS(sched_wakeup_template,
 
 	TP_PROTO(struct task_struct *p, int success),
@@ -592,6 +603,9 @@ DEFINE_EVENT(sched_wakeup_template, sched_wakeup,
 	     TP_PROTO(struct task_struct *p, int success),
 	     TP_ARGS(p, success));
 
+/*
+ * Tracepoint for waking up a new task:
+ */
 DEFINE_EVENT(sched_wakeup_template, sched_wakeup_new,
 	     TP_PROTO(struct task_struct *p, int success),
 	     TP_ARGS(p, success));
@@ -602,6 +616,9 @@ static inline long __trace_sched_switch_state(struct task_struct *p)
 	long state = p->state;
 
 #ifdef CONFIG_PREEMPT
+	/*
+	 * For all intents and purposes a preempted task is a running task.
+	 */
 	if (preempt_count() & PREEMPT_ACTIVE)
 		state = TASK_RUNNING | TASK_STATE_MAX;
 #endif
@@ -610,6 +627,9 @@ static inline long __trace_sched_switch_state(struct task_struct *p)
 }
 #endif
 
+/*
+ * Tracepoint for task switches, performed by the scheduler:
+ */
 TRACE_EVENT(sched_switch,
 
 	TP_PROTO(struct task_struct *prev,
@@ -648,6 +668,9 @@ TRACE_EVENT(sched_switch,
 		__entry->next_comm, __entry->next_pid, __entry->next_prio)
 );
 
+/*
+ * Tracepoint for a task being migrated:
+ */
 TRACE_EVENT(sched_migrate_task,
 
 	TP_PROTO(struct task_struct *p, int dest_cpu,
@@ -678,6 +701,9 @@ TRACE_EVENT(sched_migrate_task,
 		  __entry->orig_cpu, __entry->dest_cpu)
 );
 
+/*
+ * Tracepoint for load balancing:
+ */
 #if NR_CPUS > 32
 #error "Unsupported NR_CPUS for lb tracepoint."
 #endif
@@ -725,6 +751,9 @@ TRACE_EVENT(sched_load_balance,
 		  __entry->balance_interval)
 );
 
+/*
+ * Tracepoint for a CPU going offline/online:
+ */
 TRACE_EVENT(sched_cpu_hotplug,
 
 	TP_PROTO(int affected_cpu, int error, int status),
@@ -769,19 +798,31 @@ DECLARE_EVENT_CLASS(sched_process_template,
 		  __entry->comm, __entry->pid, __entry->prio)
 );
 
+/*
+ * Tracepoint for freeing a task:
+ */
 DEFINE_EVENT(sched_process_template, sched_process_free,
 	     TP_PROTO(struct task_struct *p),
 	     TP_ARGS(p));
 	     
 
+/*
+ * Tracepoint for a task exiting:
+ */
 DEFINE_EVENT(sched_process_template, sched_process_exit,
 	     TP_PROTO(struct task_struct *p),
 	     TP_ARGS(p));
 
+/*
+ * Tracepoint for waiting on task to unschedule:
+ */
 DEFINE_EVENT(sched_process_template, sched_wait_task,
 	TP_PROTO(struct task_struct *p),
 	TP_ARGS(p));
 
+/*
+ * Tracepoint for a waiting task:
+ */
 TRACE_EVENT(sched_process_wait,
 
 	TP_PROTO(struct pid *pid),
@@ -804,6 +845,9 @@ TRACE_EVENT(sched_process_wait,
 		  __entry->comm, __entry->pid, __entry->prio)
 );
 
+/*
+ * Tracepoint for do_fork:
+ */
 TRACE_EVENT(sched_process_fork,
 
 	TP_PROTO(struct task_struct *parent, struct task_struct *child),
@@ -829,6 +873,9 @@ TRACE_EVENT(sched_process_fork,
 		__entry->child_comm, __entry->child_pid)
 );
 
+/*
+ * Tracepoint for exec:
+ */
 TRACE_EVENT(sched_process_exec,
 
 	TP_PROTO(struct task_struct *p, pid_t old_pid,
@@ -852,6 +899,10 @@ TRACE_EVENT(sched_process_exec,
 		  __entry->pid, __entry->old_pid)
 );
 
+/*
+ * XXX the below sched_stat tracepoints only apply to SCHED_OTHER/BATCH/IDLE
+ *     adding sched_stat support to SCHED_FIFO/RR would be welcome.
+ */
 DECLARE_EVENT_CLASS(sched_stat_template,
 
 	TP_PROTO(struct task_struct *tsk, u64 delay),
@@ -876,22 +927,41 @@ DECLARE_EVENT_CLASS(sched_stat_template,
 );
 
 
+/*
+ * Tracepoint for accounting wait time (time the task is runnable
+ * but not actually running due to scheduler contention).
+ */
 DEFINE_EVENT(sched_stat_template, sched_stat_wait,
 	     TP_PROTO(struct task_struct *tsk, u64 delay),
 	     TP_ARGS(tsk, delay));
 
+/*
+ * Tracepoint for accounting sleep time (time the task is not runnable,
+ * including iowait, see below).
+ */
 DEFINE_EVENT(sched_stat_template, sched_stat_sleep,
 	     TP_PROTO(struct task_struct *tsk, u64 delay),
 	     TP_ARGS(tsk, delay));
 
+/*
+ * Tracepoint for accounting iowait time (time the task is not runnable
+ * due to waiting on IO to complete).
+ */
 DEFINE_EVENT(sched_stat_template, sched_stat_iowait,
 	     TP_PROTO(struct task_struct *tsk, u64 delay),
 	     TP_ARGS(tsk, delay));
 
+/*
+ * Tracepoint for accounting blocked time (time the task is in uninterruptible).
+ */
 DEFINE_EVENT(sched_stat_template, sched_stat_blocked,
 	     TP_PROTO(struct task_struct *tsk, u64 delay),
 	     TP_ARGS(tsk, delay));
 
+/*
+ * Tracepoint for accounting runtime (time the task is executing
+ * on a CPU).
+ */
 DECLARE_EVENT_CLASS(sched_stat_runtime,
 
 	TP_PROTO(struct task_struct *tsk, u64 runtime, u64 vruntime),
@@ -922,6 +992,10 @@ DEFINE_EVENT(sched_stat_runtime, sched_stat_runtime,
 	     TP_PROTO(struct task_struct *tsk, u64 runtime, u64 vruntime),
 	     TP_ARGS(tsk, runtime, vruntime));
 
+/*
+ * Tracepoint for showing priority inheritance modifying a tasks
+ * priority.
+ */
 TRACE_EVENT(sched_pi_setprio,
 
 	TP_PROTO(struct task_struct *tsk, int newprio),
@@ -964,7 +1038,7 @@ TRACE_EVENT(sched_process_hang,
 
 	TP_printk("comm=%s pid=%d", __entry->comm, __entry->pid)
 );
-#endif 
+#endif /* CONFIG_DETECT_HUNG_TASK */
 
 DECLARE_EVENT_CLASS(sched_move_task_template,
 
@@ -998,6 +1072,10 @@ DECLARE_EVENT_CLASS(sched_move_task_template,
 			__entry->dst_cpu, __entry->dst_nid)
 );
 
+/*
+ * Tracks migration of tasks from one runqueue to another. Can be used to
+ * detect if automatic NUMA balancing is bouncing between nodes
+ */
 DEFINE_EVENT(sched_move_task_template, sched_move_numa,
 	TP_PROTO(struct task_struct *tsk, int src_cpu, int dst_cpu),
 
@@ -1050,6 +1128,9 @@ TRACE_EVENT(sched_swap_numa,
 			__entry->dst_cpu, __entry->dst_nid)
 );
 
+/*
+ * Tracepoint for waking a polling cpu without an IPI.
+ */
 TRACE_EVENT(sched_wake_idle_without_ipi,
 
 	TP_PROTO(int cpu),
@@ -1088,7 +1169,39 @@ TRACE_EVENT(sched_get_nr_running_avg,
 	TP_printk("avg=%d big_avg=%d iowait_avg=%d",
 		__entry->avg, __entry->big_avg, __entry->iowait_avg)
 );
-#endif 
 
+TRACE_EVENT(sched_get_task_cpu_cycles,
+
+	TP_PROTO(int cpu, int event, u64 cycles, u32 exec_time),
+
+	TP_ARGS(cpu, event, cycles, exec_time),
+
+	TP_STRUCT__entry(
+		__field(int,		cpu		)
+		__field(int,		event		)
+		__field(u64,		cycles		)
+		__field(u64,		exec_time	)
+		__field(u32,		freq		)
+		__field(u32,		legacy_freq	)
+	),
+
+	TP_fast_assign(
+		__entry->cpu 		= cpu;
+		__entry->event 		= event;
+		__entry->cycles 	= cycles;
+		__entry->exec_time 	= exec_time;
+		__entry->freq 		= cpu_cycles_to_freq(cpu, cycles,
+							     exec_time);
+		__entry->legacy_freq 	= cpu_cur_freq(cpu);
+	),
+
+	TP_printk("cpu=%d event=%d cycles=%llu exec_time=%llu freq=%u legacy_freq=%u",
+		  __entry->cpu, __entry->event, __entry->cycles,
+		  __entry->exec_time, __entry->freq, __entry->legacy_freq)
+);
+
+#endif /* _TRACE_SCHED_H */
+
+/* This part must be outside protection */
 #include <trace/define_trace.h>
-#endif 
+#endif /* CONFIG_SCHED_QHMP */
