@@ -356,10 +356,12 @@ struct sched_cluster {
 	int efficiency; /* Differentiate cpus with different IPC capability */
 	int load_scale_factor;
 	/*
-	 * max_freq = user or thermal defined maximum
+	 * max_freq = user maximum
+	 * max_mitigated_freq = thermal defined maximum
 	 * max_possible_freq = maximum supported by hardware
 	 */
-	unsigned int cur_freq, max_freq, min_freq, max_possible_freq;
+	unsigned int cur_freq, max_freq, max_mitigated_freq, min_freq;
+	unsigned int max_possible_freq;
 	/*
 	 * cpu_cycle_max_scale_factor represents number of cycles per NSEC at
 	 * CPU's fmax.
@@ -707,13 +709,6 @@ struct rq {
 	unsigned int static_cpu_pwr_cost;
 	struct task_struct *ed_task;
 
-	u64 load_history[SCHED_LOAD_WINDOW_SIZE];
-	int load_avg;
-	int budget;
-	int load_history_index;
-	u64 load_last_update_timestamp;
-
-
 #ifdef CONFIG_SCHED_FREQ_INPUT
 	unsigned int old_busy_time;
 	int notifier_sent;
@@ -1024,9 +1019,19 @@ static inline unsigned int cpu_min_freq(int cpu)
 	return cpu_rq(cpu)->cluster->min_freq;
 }
 
+static inline unsigned int cluster_max_freq(struct sched_cluster *cluster)
+{
+	/*
+	 * Governor and thermal driver don't know the other party's mitigation
+	 * voting. So struct cluster saves both and return min() for current
+	 * cluster fmax.
+	 */
+	return min(cluster->max_mitigated_freq, cluster->max_freq);
+}
+
 static inline unsigned int cpu_max_freq(int cpu)
 {
-	return cpu_rq(cpu)->cluster->max_freq;
+	return cluster_max_freq(cpu_rq(cpu)->cluster);
 }
 
 static inline unsigned int cpu_max_possible_freq(int cpu)
@@ -1548,9 +1553,10 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 	 * After ->on_cpu is cleared, the task can be moved to a different CPU.
 	 * We must ensure this doesn't happen until the switch is completely
 	 * finished.
+	 *
+	 * Pairs with the control dependency and rmb in try_to_wake_up().
 	 */
-	smp_wmb();
-	prev->on_cpu = 0;
+	smp_store_release(&prev->on_cpu, 0);
 #endif
 #ifdef CONFIG_DEBUG_SPINLOCK
 	/* this is a valid case when another task releases the spinlock */
