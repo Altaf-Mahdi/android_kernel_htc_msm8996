@@ -2034,8 +2034,12 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 
 	session = lsm_d->lsm_session;
 	lsm_ops = &cpe->lsm_ops;
-	if (!lsm_ops)
-		return -EINVAL;
+//HTC_AUD_START klockwork
+	if (!lsm_ops) {
+		err = -EINVAL;
+		goto done;
+	}
+//HTC_AUD_END
 
 	switch (cmd) {
 	case SNDRV_LSM_REG_SND_MODEL_V2: {
@@ -2045,7 +2049,8 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 			dev_err(rtd->dev,
 				"%s: %s: not supported if using topology\n",
 				__func__, "LSM_REG_SND_MODEL_V2");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (copy_from_user(&snd_model, (void *)arg,
@@ -2125,7 +2130,8 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 			dev_err(rtd->dev,
 				"%s: %s: not supported if using topology\n",
 				__func__, "SNDRV_LSM_SET_PARAMS");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (copy_from_user(&det_params, (void *) arg,
@@ -2152,14 +2158,16 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 			dev_err(rtd->dev,
 				"%s: %s: not supported if not using topology\n",
 				__func__, "SET_MODULE_PARAMS");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (!arg) {
 			dev_err(rtd->dev,
 				"%s: %s: No Param data to set\n",
 				__func__, "SET_MODULE_PARAMS");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (copy_from_user(&p_data, arg,
@@ -2167,7 +2175,8 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 			dev_err(rtd->dev,
 				"%s: %s: copy_from_user failed, size = %zd\n",
 				__func__, "p_data", sizeof(p_data));
-			return -EFAULT;
+			err = -EFAULT;
+			goto done;
 		}
 
 		if (p_data.num_params > LSM_PARAMS_MAX) {
@@ -2175,7 +2184,8 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 				"%s: %s: Invalid num_params %d\n",
 				__func__, "SET_MODULE_PARAMS",
 				p_data.num_params);
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		p_size = p_data.num_params *
@@ -2186,12 +2196,15 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 				"%s: %s: Invalid size %zd\n",
 				__func__, "SET_MODULE_PARAMS", p_size);
 
-			return -EFAULT;
+			err = -EFAULT;
+			goto done;
 		}
 
 		params = kzalloc(p_size, GFP_KERNEL);
-		if (!params)
-			return -ENOMEM;
+		if (!params) {
+			err = -ENOMEM;
+			goto done;
+		}
 
 		if (copy_from_user(params, p_data.params,
 				   p_data.data_size)) {
@@ -2199,7 +2212,8 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 				"%s: %s: copy_from_user failed, size = %d\n",
 				__func__, "params", p_data.data_size);
 			kfree(params);
-			return -EFAULT;
+			err = -EFAULT;
+			goto done;
 		}
 
 		err = msm_cpe_lsm_process_params(substream, &p_data, params);
@@ -2308,8 +2322,12 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 
 	session = lsm_d->lsm_session;
 	lsm_ops = &cpe->lsm_ops;
-	if (!lsm_ops)
-		return -EINVAL;
+//HTC_AUD_START klockwork
+	if (!lsm_ops) {
+		err = -EINVAL;
+		goto done;
+	}
+//HTC_AUD_END
 
 	switch (cmd) {
 	case SNDRV_LSM_REG_SND_MODEL_V2_32: {
@@ -2320,7 +2338,8 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 			dev_err(rtd->dev,
 				"%s: %s: not supported if using topology\n",
 				__func__, "LSM_REG_SND_MODEL_V2_32");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		dev_dbg(rtd->dev,
@@ -2451,7 +2470,8 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 			dev_err(rtd->dev,
 				"%s: %s: not supported if using topology\n",
 				__func__, "SNDRV_LSM_SET_PARAMS32");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (copy_from_user(&det_params32, arg,
@@ -2495,14 +2515,16 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 			dev_err(rtd->dev,
 				"%s: %s: not supported if not using topology\n",
 				__func__, "SET_MODULE_PARAMS_32");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (!arg) {
 			dev_err(rtd->dev,
 				"%s: %s: No Param data to set\n",
 				__func__, "SET_MODULE_PARAMS_32");
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (copy_from_user(&p_data_32, arg,
@@ -2511,7 +2533,8 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 				"%s: %s: copy_from_user failed, size = %zd\n",
 				__func__, "SET_MODULE_PARAMS_32",
 				sizeof(p_data_32));
-			return -EFAULT;
+			err = -EFAULT;
+			goto done;
 		}
 
 		p_data.params = compat_ptr(p_data_32.params);
@@ -2523,7 +2546,8 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 				"%s: %s: Invalid num_params %d\n",
 				__func__, "SET_MODULE_PARAMS_32",
 				p_data.num_params);
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		if (p_data.data_size !=
@@ -2532,21 +2556,25 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 				"%s: %s: Invalid size %d\n",
 				__func__, "SET_MODULE_PARAMS_32",
 				p_data.data_size);
-			return -EINVAL;
+			err = -EINVAL;
+			goto done;
 		}
 
 		p_size = sizeof(struct lsm_params_info_32) *
 			 p_data.num_params;
 
 		params32 = kzalloc(p_size, GFP_KERNEL);
-		if (!params32)
-			return -ENOMEM;
+		if (!params32) {
+			err = -ENOMEM;
+			goto done;
+		}
 
 		p_size = sizeof(struct lsm_params_info) * p_data.num_params;
 		params = kzalloc(p_size, GFP_KERNEL);
 		if (!params) {
 			kfree(params32);
-			return -ENOMEM;
+			err = -ENOMEM;
+			goto done;
 		}
 
 		if (copy_from_user(params32, p_data.params,
@@ -2556,7 +2584,8 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 				__func__, "params32", p_data.data_size);
 			kfree(params32);
 			kfree(params);
-			return -EFAULT;
+			err = -EFAULT;
+			goto done;
 		}
 
 		p_info_32 = (struct lsm_params_info_32 *) params32;
