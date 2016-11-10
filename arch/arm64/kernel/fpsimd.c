@@ -93,11 +93,6 @@
 static DEFINE_PER_CPU(struct fpsimd_state *, fpsimd_last_state);
 static DEFINE_PER_CPU(int, fpsimd_stg_enable);
 
-void fpsimd_settings_enable(void)
-{
-	set_app_setting_bit(FP_SIMD_BIT);
-}
-
 void fpsimd_settings_disable(void)
 {
 	clear_app_setting_bit(FP_SIMD_BIT);
@@ -106,11 +101,6 @@ void fpsimd_settings_disable(void)
 void fpsimd_settings_enable(void)
 {
 	set_app_setting_bit(FP_SIMD_BIT);
-}
-
-void fpsimd_settings_disable(void)
-{
-	clear_app_setting_bit(FP_SIMD_BIT);
 }
 
 /*
