@@ -1531,6 +1531,64 @@ static struct notifier_block vmstat_notifier =
 	{ &vmstat_cpuup_callback, NULL, 0 };
 #endif
 
+#define NR_START_VM_EVENT		NR_VM_ZONE_STAT_ITEMS + NR_VM_WRITEBACK_STAT_ITEMS
+void dump_vm_events_counter(void)
+{
+	static unsigned long prev_events[NR_VM_EVENT_ITEMS];
+	unsigned long events[NR_VM_EVENT_ITEMS];
+	int i;
+
+	all_vm_events(events);
+	
+	events[PGPGIN] /= 2;
+	events[PGPGOUT] /= 2;
+
+	
+	for (i = 0; i < NR_VM_EVENT_ITEMS; i++) {
+		if (events[i] - prev_events[i] > 0)
+			pr_info("[K] %s_diff = %lu\n",
+				vmstat_text[i + NR_START_VM_EVENT],
+				events[i] - prev_events[i]);
+	}
+	memcpy(prev_events, events, sizeof(unsigned long) * NR_VM_EVENT_ITEMS);
+}
+
+void vm_event_report_meminfo(struct seq_file *m)
+{
+	unsigned long events[NR_VM_EVENT_ITEMS];
+
+	all_vm_events(events);
+	
+	events[PGPGIN] /= 2;
+	events[PGPGOUT] /= 2;
+
+	seq_printf(m,
+	"%s:               %10lu\n"
+	"%s:           %10lu\n"
+	"%s:           %10lu\n"
+	"%s:           %10lu\n"
+	"%s:          %10lu\n"
+	"%s:        %10lu\n"
+	"%s:            %10lu\n"
+	"%s:        %10lu\n"
+	"%s:        %10lu\n"
+	"%s:        %10lu\n"
+	"%s:       %10lu\n"
+	"%s:     %10lu\n",
+	vmstat_text[ALLOCSTALL + NR_START_VM_EVENT], events[ALLOCSTALL],
+	vmstat_text[ALLOCSTALL_100 + NR_START_VM_EVENT], events[ALLOCSTALL_100],
+	vmstat_text[ALLOCSTALL_250 + NR_START_VM_EVENT], events[ALLOCSTALL_250],
+	vmstat_text[ALLOCSTALL_500 + NR_START_VM_EVENT], events[ALLOCSTALL_500],
+	vmstat_text[ALLOCSTALL_1000 + NR_START_VM_EVENT], events[ALLOCSTALL_1000],
+	vmstat_text[ALLOCSTALL_HORDER + NR_START_VM_EVENT], events[ALLOCSTALL_HORDER],
+	vmstat_text[COMPACTSTALL + NR_START_VM_EVENT], events[COMPACTSTALL],
+	vmstat_text[COMPACTSTALL_100 + NR_START_VM_EVENT], events[COMPACTSTALL_100],
+	vmstat_text[COMPACTSTALL_250 + NR_START_VM_EVENT], events[COMPACTSTALL_250],
+	vmstat_text[COMPACTSTALL_500 + NR_START_VM_EVENT], events[COMPACTSTALL_500],
+	vmstat_text[COMPACTSTALL_1000 + NR_START_VM_EVENT], events[COMPACTSTALL_1000],
+	vmstat_text[COMPACTSTALL_HORDER + NR_START_VM_EVENT], events[COMPACTSTALL_HORDER]);
+}
+
 static int __init setup_vmstat(void)
 {
 #ifdef CONFIG_SMP

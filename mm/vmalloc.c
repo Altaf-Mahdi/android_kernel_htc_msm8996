@@ -594,13 +594,6 @@ overflow:
 		printk(KERN_WARNING
 			"vmap allocation for size %lu failed: "
 			"use vmalloc=<size> to increase size.\n", size);
-
-#ifdef CONFIG_HTC_DEBUG_VMALLOC_DUMP
-	if((last_dump_jiffies == 0) || time_is_before_jiffies(last_dump_jiffies + DUMP_VMALLOC_INTERVAL)) {
-		dump_vmallocinfo();
-		last_dump_jiffies = jiffies;
-	}
-#endif
 	kfree(va);
 	return ERR_PTR(-EBUSY);
 }
