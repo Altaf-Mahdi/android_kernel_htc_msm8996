@@ -2077,11 +2077,6 @@ static int __cpufreq_governor(struct cpufreq_policy *policy,
 #else
 	struct cpufreq_governor *gov = NULL;
 #endif
-	if (!policy->governor) {
-		printk(KERN_WARNING "policy->governor is NULL, policy->cpu = %u\n",
-			       policy->cpu);
-		return -EBUSY;
-	}
 
 	/* Don't start any governor operations if we are entering suspend */
 	if (cpufreq_suspended)
@@ -2332,6 +2327,13 @@ int cpufreq_update_policy(unsigned int cpu)
 	int ret;
 
 	if (!policy)
+		return -ENODEV;
+    /* when CPU online/offline, kobj(sysfs) would create/delete after/before online maske change
+     * If we get policy during this moment, we'll get an uninitial/null kobj in cpu policy
+     * online has been solved by QCOM a532c01574631f23aba991d6bab97771d5141290
+     * for safety, this check supposed to avoid both condition.
+     */
+	if(!(&policy->kobj))
 		return -ENODEV;
 
 	down_write(&policy->rwsem);
