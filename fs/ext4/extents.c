@@ -313,9 +313,13 @@ static int ext4_valid_extent(struct inode *inode, struct ext4_extent *ext)
 	ext4_fsblk_t block = ext4_ext_pblock(ext);
 	int len = ext4_ext_get_actual_len(ext);
 	ext4_lblk_t lblock = le32_to_cpu(ext->ee_block);
-	ext4_lblk_t last = lblock + len - 1;
 
-	if (len == 0 || lblock > last)
+	/*
+	 * We allow neither:
+	 *  - zero length
+	 *  - overflow/wrap-around
+	 */
+	if (lblock + len <= lblock)
 		return 0;
 	return ext4_data_block_valid(EXT4_SB(inode->i_sb), block, len);
 }
@@ -4126,7 +4130,7 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 	if (mode & FALLOC_FL_KEEP_SIZE)
 		flags |= EXT4_GET_BLOCKS_KEEP_SIZE;
 
-	
+	/* Preallocate the range including the unaligned edges */
 	if (partial_begin || partial_end) {
 		ret = ext4_alloc_file_blocks(file,
 				round_down(offset, 1 << blkbits) >> blkbits,
@@ -4138,7 +4142,7 @@ static long ext4_zero_range(struct file *file, loff_t offset,
 
 	}
 
-	
+	/* Zero range excluding the unaligned edges */
 	if (max_blocks > 0) {
 		flags |= (EXT4_GET_BLOCKS_CONVERT_UNWRITTEN |
 			  EXT4_EX_NOCACHE);

@@ -72,6 +72,26 @@ static int snd_pcm_open(struct file *file, struct snd_pcm *pcm, int stream);
 static DEFINE_RWLOCK(snd_pcm_link_rwlock);
 static DECLARE_RWSEM(snd_pcm_link_rwsem);
 
+/* Writer in rwsem may block readers even during its waiting in queue,
+ * and this may lead to a deadlock when the code path takes read sem
+ * twice (e.g. one in snd_pcm_action_nonatomic() and another in
+ * snd_pcm_stream_lock()).  As a (suboptimal) workaround, let writer to
+ * spin until it gets the lock.
+ */
+static inline void down_write_nonblock(struct rw_semaphore *lock)
+{
+	while (!down_write_trylock(lock))
+		cond_resched();
+}
+
+/**
+ * snd_pcm_stream_lock - Lock the PCM stream
+ * @substream: PCM substream
+ *
+ * This locks the PCM stream's spinlock or mutex depending on the nonatomic
+ * flag of the given substream.  This also takes the global link rw lock
+ * (or rw sem), too, for avoiding the race with linked streams.
+ */
 void snd_pcm_stream_lock(struct snd_pcm_substream *substream)
 {
 	if (substream->pcm->nonatomic) {
@@ -84,6 +104,12 @@ void snd_pcm_stream_lock(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL_GPL(snd_pcm_stream_lock);
 
+/**
+ * snd_pcm_stream_lock - Unlock the PCM stream
+ * @substream: PCM substream
+ *
+ * This unlocks the PCM stream that has been locked via snd_pcm_stream_lock().
+ */
 void snd_pcm_stream_unlock(struct snd_pcm_substream *substream)
 {
 	if (substream->pcm->nonatomic) {
@@ -96,6 +122,14 @@ void snd_pcm_stream_unlock(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL_GPL(snd_pcm_stream_unlock);
 
+/**
+ * snd_pcm_stream_lock_irq - Lock the PCM stream
+ * @substream: PCM substream
+ *
+ * This locks the PCM stream like snd_pcm_stream_lock() and disables the local
+ * IRQ (only when nonatomic is false).  In nonatomic case, this is identical
+ * as snd_pcm_stream_lock().
+ */
 void snd_pcm_stream_lock_irq(struct snd_pcm_substream *substream)
 {
 	if (!substream->pcm->nonatomic)
@@ -104,6 +138,12 @@ void snd_pcm_stream_lock_irq(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL_GPL(snd_pcm_stream_lock_irq);
 
+/**
+ * snd_pcm_stream_unlock_irq - Unlock the PCM stream
+ * @substream: PCM substream
+ *
+ * This is a counter-part of snd_pcm_stream_lock_irq().
+ */
 void snd_pcm_stream_unlock_irq(struct snd_pcm_substream *substream)
 {
 	snd_pcm_stream_unlock(substream);
@@ -122,6 +162,13 @@ unsigned long _snd_pcm_stream_lock_irqsave(struct snd_pcm_substream *substream)
 }
 EXPORT_SYMBOL_GPL(_snd_pcm_stream_lock_irqsave);
 
+/**
+ * snd_pcm_stream_unlock_irqrestore - Unlock the PCM stream
+ * @substream: PCM substream
+ * @flags: irq flags
+ *
+ * This is a counter-part of snd_pcm_stream_lock_irqsave().
+ */
 void snd_pcm_stream_unlock_irqrestore(struct snd_pcm_substream *substream,
 				      unsigned long flags)
 {
@@ -1653,7 +1700,7 @@ static int snd_pcm_link(struct snd_pcm_substream *substream, int fd)
 		res = -ENOMEM;
 		goto _nolock;
 	}
-	down_write(&snd_pcm_link_rwsem);
+	down_write_nonblock(&snd_pcm_link_rwsem);
 	write_lock_irq(&snd_pcm_link_rwlock);
 	if (substream->runtime->status->state == SNDRV_PCM_STATE_OPEN ||
 	    substream->runtime->status->state != substream1->runtime->status->state ||
@@ -1700,7 +1747,7 @@ static int snd_pcm_unlink(struct snd_pcm_substream *substream)
 	struct snd_pcm_substream *s;
 	int res = 0;
 
-	down_write(&snd_pcm_link_rwsem);
+	down_write_nonblock(&snd_pcm_link_rwsem);
 	write_lock_irq(&snd_pcm_link_rwlock);
 	if (!snd_pcm_stream_linked(substream)) {
 		res = -EALREADY;
@@ -3240,6 +3287,18 @@ static const struct vm_operations_struct snd_pcm_vm_ops_data_fault = {
 #endif
 #endif
 
+/*
+ * mmap the DMA buffer on RAM
+ */
+
+/**
+ * snd_pcm_lib_default_mmap - Default PCM data mmap function
+ * @substream: PCM substream
+ * @area: VMA
+ *
+ * This is the default mmap handler for PCM data.  When mmap pcm_ops is NULL,
+ * this function is invoked implicitly.
+ */
 int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 			     struct vm_area_struct *area)
 {
@@ -3272,6 +3331,15 @@ int snd_pcm_lib_default_mmap(struct snd_pcm_substream *substream,
 EXPORT_SYMBOL_GPL(snd_pcm_lib_default_mmap);
 
 #if SNDRV_PCM_INFO_MMAP_IOMEM
+/**
+ * snd_pcm_lib_mmap_iomem - Default PCM data mmap function for I/O mem
+ * @substream: PCM substream
+ * @area: VMA
+ *
+ * When your hardware uses the iomapped pages as the hardware buffer and
+ * wants to mmap it, pass this function as mmap pcm_ops.  Note that this
+ * is supposed to work only on limited architectures.
+ */
 int snd_pcm_lib_mmap_iomem(struct snd_pcm_substream *substream,
 			   struct vm_area_struct *area)
 {

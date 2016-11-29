@@ -95,6 +95,13 @@ struct usb_hub *usb_hub_to_struct_hub(struct usb_device *hdev)
 
 static int usb_device_supports_lpm(struct usb_device *udev)
 {
+	/* Some devices have trouble with LPM */
+	if (udev->quirks & USB_QUIRK_NO_LPM)
+		return 0;
+
+	/* USB 2.1 (and greater) devices indicate LPM support through
+	 * their USB 2.0 Extended Capabilities BOS descriptor.
+	 */
 	if (udev->speed == USB_SPEED_HIGH) {
 		if (udev->bos->ext_cap &&
 			(USB_LPM_SUPPORT &
@@ -793,11 +800,11 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 	bool need_debounce_delay = false;
 	unsigned delay;
 
-	
+	/* Continue a partial initialization */
 	if (type == HUB_INIT2 || type == HUB_INIT3) {
 		device_lock(hub->intfdev);
 
-		
+		/* Was the hub disconnected while we were waiting? */
 		if (hub->disconnected) {
 			device_unlock(hub->intfdev);
 			kref_put(&hub->kref, hub_release);
@@ -939,7 +946,7 @@ static void hub_activate(struct usb_hub *hub, enum hub_activation_type type)
 					&hub->init_work,
 					msecs_to_jiffies(delay));
 			device_unlock(hub->intfdev);
-			return;		
+			return;		/* Continues at init3: below */
 		} else {
 			msleep(delay);
 		}
@@ -990,9 +997,7 @@ static void hub_quiesce(struct usb_hub *hub, enum hub_quiescing_type type)
 	struct usb_device *hdev = hub->hdev;
 	int i;
 
-	cancel_delayed_work_sync(&hub->init_work);
-
-	
+	/* hub_wq and related activity won't re-trigger */
 	hub->quiescing = 1;
 
 	if (type != HUB_SUSPEND) {
@@ -1630,8 +1635,8 @@ static void choose_devnum(struct usb_device *udev)
 	int		devnum;
 	struct usb_bus	*bus = udev->bus;
 
-	
-	mutex_lock(&bus->usb_address0_mutex);
+	/* be safe when more hub events are proceed in parallel */
+	mutex_lock(&bus->devnum_next_mutex);
 	if (udev->wusb) {
 		devnum = udev->portnum + 1;
 		BUG_ON(test_bit(devnum, bus->devmap.devicemap));
@@ -1647,7 +1652,7 @@ static void choose_devnum(struct usb_device *udev)
 		set_bit(devnum, bus->devmap.devicemap);
 		udev->devnum = devnum;
 	}
-	mutex_unlock(&bus->usb_address0_mutex);
+	mutex_unlock(&bus->devnum_next_mutex);
 }
 
 static void release_devnum(struct usb_device *udev)
@@ -3303,7 +3308,7 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 {
 	struct usb_device	*hdev = hub->hdev;
 	struct usb_hcd		*hcd = bus_to_hcd(hdev->bus);
-	int			i, j, retval;
+	int			retries, operations, retval, i;
 	unsigned		delay = HUB_SHORT_RESET_TIME;
 	enum usb_device_speed	oldspeed = udev->speed;
 	const char		*speed;
@@ -3320,7 +3325,7 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 	if (oldspeed == USB_SPEED_LOW)
 		delay = HUB_LONG_RESET_TIME;
 
-	mutex_lock(&hdev->bus->usb_address0_mutex);
+	mutex_lock(hcd->address0_mutex);
 
 	
 	
@@ -3381,7 +3386,19 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 		udev->ttport = port1;
 	}
 
-	for (i = 0; i < GET_DESCRIPTOR_TRIES; (++i, msleep(100))) {
+	/* Why interleave GET_DESCRIPTOR and SET_ADDRESS this way?
+	 * Because device hardware and firmware is sometimes buggy in
+	 * this area, and this is how Linux has done it for ages.
+	 * Change it cautiously.
+	 *
+	 * NOTE:  If use_new_scheme() is true we will start by issuing
+	 * a 64-byte GET_DESCRIPTOR request.  This is what Windows does,
+	 * so it may help with some non-standards-compliant devices.
+	 * Otherwise we start with SET_ADDRESS and then try to read the
+	 * first 8 bytes of the device descriptor to get the ep0 maxpacket
+	 * value.
+	 */
+	for (retries = 0; retries < GET_DESCRIPTOR_TRIES; (++retries, msleep(100))) {
 		bool did_new_scheme = false;
 
 		if (use_new_scheme(udev, retry_counter)) {
@@ -3404,7 +3421,11 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 				continue;
 			}
 
-			for (j = 0; j < 3; ++j) {
+			/* Retry on all errors; some devices are flakey.
+			 * 255 is for WUSB devices, we actually need to use
+			 * 512 (WUSB1.0[4.8.1]).
+			 */
+			for (operations = 0; operations < 3; ++operations) {
 				buf->bMaxPacketSize0 = 0;
 				r = usb_control_msg(udev, usb_rcvaddr0pipe(),
 					USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
@@ -3424,7 +3445,13 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 						r = -EPROTO;
 					break;
 				}
-				if (r == 0)
+				/*
+				 * Some devices time out if they are powered on
+				 * when already connected. They need a second
+				 * reset. But only on the first attempt,
+				 * lest we get into a time out/reset loop
+				 */
+				if (r == 0  || (r == -ETIMEDOUT && retries == 0))
 					break;
 			}
 			udev->descriptor.bMaxPacketSize0 =
@@ -3451,7 +3478,7 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 		}
 
 		if (udev->wusb == 0) {
-			for (j = 0; j < SET_ADDRESS_TRIES; ++j) {
+			for (operations = 0; operations < SET_ADDRESS_TRIES; ++operations) {
 				retval = hub_set_address(udev, devnum);
 				if (retval >= 0)
 					break;
@@ -3532,6 +3559,8 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 		goto fail;
 	}
 
+	usb_detect_quirks(udev);
+
 	if (udev->wusb == 0 && le16_to_cpu(udev->descriptor.bcdUSB) >= 0x0201) {
 		retval = usb_get_bos_descriptor(udev);
 		if (!retval) {
@@ -3550,7 +3579,7 @@ fail:
 		hub_port_disable(hub, port1, 0);
 		update_devnum(udev, devnum);	
 	}
-	mutex_unlock(&hdev->bus->usb_address0_mutex);
+	mutex_unlock(hcd->address0_mutex);
 	return retval;
 }
 
@@ -3713,7 +3742,6 @@ static void hub_port_connect(struct usb_hub *hub, int port1, u16 portstatus,
 		if (status < 0)
 			goto loop;
 
-		usb_detect_quirks(udev);
 		if (udev->quirks & USB_QUIRK_DELAY_INIT)
 			msleep(1000);
 
@@ -4236,17 +4264,25 @@ static int usb_reset_and_verify_device(struct usb_device *udev)
 	bos = udev->bos;
 	udev->bos = NULL;
 
+	/* Disable LPM and LTM while we reset the device and reinstall the alt
+	 * settings.  Device-initiated LPM settings, and system exit latency
+	 * settings are cleared when the device is reset, so we have to set
+	 * them up again.
+	 */
 	ret = usb_unlocked_disable_lpm(udev);
 	if (ret) {
 		dev_err(&udev->dev, "%s Failed to disable LPM\n.", __func__);
-		goto re_enumerate;
+		goto re_enumerate_no_bos;
 	}
 	ret = usb_disable_ltm(udev);
 	if (ret) {
 		dev_err(&udev->dev, "%s Failed to disable LTM\n.",
 				__func__);
-		goto re_enumerate;
+		goto re_enumerate_no_bos;
 	}
+
+	bos = udev->bos;
+	udev->bos = NULL;
 
 	for (i = 0; i < SET_CONFIG_TRIES; ++i) {
 
@@ -4332,10 +4368,12 @@ done:
 	return 0;
 
 re_enumerate:
-	
 	hub_port_logical_disconnect(parent_hub, port1);
 	usb_release_bos_descriptor(udev);
 	udev->bos = bos;
+re_enumerate_no_bos:
+	/* LPM state doesn't matter when we're about to destroy the device. */
+	hub_port_logical_disconnect(parent_hub, port1);
 	return -ENODEV;
 }
 

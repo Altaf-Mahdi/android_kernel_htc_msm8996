@@ -309,6 +309,34 @@ void path_put(const struct path *path)
 }
 EXPORT_SYMBOL(path_put);
 
+/**
+ * path_connected - Verify that a path->dentry is below path->mnt.mnt_root
+ * @path: nameidate to verify
+ *
+ * Rename can sometimes move a file or directory outside of a bind
+ * mount, path_connected allows those cases to be detected.
+ */
+static bool path_connected(const struct path *path)
+{
+	struct vfsmount *mnt = path->mnt;
+
+	/* Only bind mounts can have disconnected paths */
+	if (mnt->mnt_root == mnt->mnt_sb->s_root)
+		return true;
+
+	return is_subdir(path->dentry, mnt->mnt_root);
+}
+
+/*
+ * Path walking has 2 modes, rcu-walk and ref-walk (see
+ * Documentation/filesystems/path-lookup.txt).  In situations when we can't
+ * continue in RCU mode, we attempt to drop out of rcu-walk mode and grab
+ * normal reference counts on dentries and vfsmounts to transition to rcu-walk
+ * mode.  Refcounts are grabbed at the last known good point before rcu-walk
+ * got stuck, so ref-walk may continue from there. If this is not successful
+ * (eg. a seqcount has changed), then failure is returned and it's up to caller
+ * to restart the path walk from the beginning in ref-walk mode.
+ */
 
 static int unlazy_walk(struct nameidata *nd, struct dentry *dentry)
 {
@@ -819,6 +847,8 @@ static int follow_dotdot_rcu(struct nameidata *nd)
 				goto failed;
 			nd->path.dentry = parent;
 			nd->seq = seq;
+			if (unlikely(!path_connected(&nd->path)))
+				goto failed;
 			break;
 		}
 		if (!follow_up_rcu(&nd->path))
@@ -897,7 +927,7 @@ static void follow_mount(struct path *path)
 	}
 }
 
-static void follow_dotdot(struct nameidata *nd)
+static int follow_dotdot(struct nameidata *nd)
 {
 	if (!nd->root.mnt)
 		set_root(nd);
@@ -913,6 +943,10 @@ static void follow_dotdot(struct nameidata *nd)
 			
 			nd->path.dentry = dget_parent(nd->path.dentry);
 			dput(old);
+			if (unlikely(!path_connected(&nd->path))) {
+				path_put(&nd->path);
+				return -ENOENT;
+			}
 			break;
 		}
 		if (!follow_up(&nd->path))
@@ -920,6 +954,7 @@ static void follow_dotdot(struct nameidata *nd)
 	}
 	follow_mount(&nd->path);
 	nd->inode = nd->path.dentry->d_inode;
+	return 0;
 }
 
 static struct dentry *lookup_dcache(struct qstr *name, struct dentry *dir,
@@ -1105,7 +1140,7 @@ static inline int handle_dots(struct nameidata *nd, int type)
 			if (follow_dotdot_rcu(nd))
 				return -ECHILD;
 		} else
-			follow_dotdot(nd);
+			return follow_dotdot(nd);
 	}
 	return 0;
 }
@@ -1709,7 +1744,7 @@ mountpoint_last(struct nameidata *nd, struct path *path)
 	if (unlikely(nd->last_type != LAST_NORM)) {
 		error = handle_dots(nd, nd->last_type);
 		if (error)
-			goto out;
+			return error;
 		dentry = dget(nd->path.dentry);
 		goto done;
 	}
@@ -2153,22 +2188,10 @@ no_open:
 		dentry = lookup_real(dir, dentry, nd->flags);
 		if (IS_ERR(dentry))
 			return PTR_ERR(dentry);
-
-		if (create_error) {
-			int open_flag = op->open_flag;
-
-			error = create_error;
-			if ((open_flag & O_EXCL)) {
-				if (!dentry->d_inode)
-					goto out;
-			} else if (!dentry->d_inode) {
-				goto out;
-			} else if ((open_flag & O_TRUNC) &&
-				   S_ISREG(dentry->d_inode->i_mode)) {
-				goto out;
-			}
-			
-		}
+	}
+	if (create_error && !dentry->d_inode) {
+		error = create_error;
+		goto out;
 	}
 looked_up:
 	path->dentry = dentry;
@@ -2421,6 +2444,10 @@ opened:
 			goto exit_fput;
 	}
 out:
+	if (unlikely(error > 0)) {
+		WARN_ON(1);
+		error = -EINVAL;
+	}
 	if (got_write)
 		mnt_drop_write(nd->path.mnt);
 	path_put(&save_parent);

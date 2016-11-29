@@ -139,14 +139,36 @@ struct inodes_stat_t {
 #define FS_IOC32_GETVERSION		_IOR('v', 1, int)
 #define FS_IOC32_SETVERSION		_IOW('v', 2, int)
 
-#define	FS_SECRM_FL			0x00000001 
-#define	FS_UNRM_FL			0x00000002 
-#define	FS_COMPR_FL			0x00000004 
-#define FS_SYNC_FL			0x00000008 
-#define FS_IMMUTABLE_FL			0x00000010 
-#define FS_APPEND_FL			0x00000020 
-#define FS_NODUMP_FL			0x00000040 
-#define FS_NOATIME_FL			0x00000080 
+/*
+ * File system encryption support
+ */
+/* Policy provided via an ioctl on the topmost directory */
+#define FS_KEY_DESCRIPTOR_SIZE	8
+
+struct fscrypt_policy {
+	__u8 version;
+	__u8 contents_encryption_mode;
+	__u8 filenames_encryption_mode;
+	__u8 flags;
+	__u8 master_key_descriptor[FS_KEY_DESCRIPTOR_SIZE];
+} __packed;
+
+#define FS_IOC_SET_ENCRYPTION_POLICY	_IOR('f', 19, struct fscrypt_policy)
+#define FS_IOC_GET_ENCRYPTION_PWSALT	_IOW('f', 20, __u8[16])
+#define FS_IOC_GET_ENCRYPTION_POLICY	_IOW('f', 21, struct fscrypt_policy)
+
+/*
+ * Inode flags (FS_IOC_GETFLAGS / FS_IOC_SETFLAGS)
+ */
+#define	FS_SECRM_FL			0x00000001 /* Secure deletion */
+#define	FS_UNRM_FL			0x00000002 /* Undelete */
+#define	FS_COMPR_FL			0x00000004 /* Compress file */
+#define FS_SYNC_FL			0x00000008 /* Synchronous updates */
+#define FS_IMMUTABLE_FL			0x00000010 /* Immutable file */
+#define FS_APPEND_FL			0x00000020 /* writes to file may only append */
+#define FS_NODUMP_FL			0x00000040 /* do not dump file */
+#define FS_NOATIME_FL			0x00000080 /* do not update atime */
+/* Reserved for compression usage... */
 #define FS_DIRTY_FL			0x00000100
 #define FS_COMPRBLK_FL			0x00000200 
 #define FS_NOCOMP_FL			0x00000400 
