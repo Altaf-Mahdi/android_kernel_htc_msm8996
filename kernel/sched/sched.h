@@ -66,8 +66,6 @@ static inline void update_cpu_load_active(struct rq *this_rq) { }
 #define NICE_0_LOAD		SCHED_LOAD_SCALE
 #define NICE_0_SHIFT		SCHED_LOAD_SHIFT
 
-#define SCHED_LOAD_WINDOW_SIZE  10
-
 /*
  * Single value that decides SCHED_DEADLINE internal math precision.
  * 10 -> just above 1us
@@ -1505,10 +1503,9 @@ static inline unsigned long __cpu_util(int cpu, int delta, bool use_pelt)
 		util = max(util, cpu_rq(cpu)->cfs.avg.util_est);
 
 #ifdef CONFIG_SCHED_WALT
-	if (!walt_disabled && sysctl_sched_use_walt_cpu_util) {
-		util = cpu_rq(cpu)->prev_runnable_sum << SCHED_LOAD_SHIFT;
-		do_div(util, walt_ravg_window);
-	}
+	if (!walt_disabled && sysctl_sched_use_walt_cpu_util)
+		util = (cpu_rq(cpu)->prev_runnable_sum << SCHED_LOAD_SHIFT) /
+			walt_ravg_window;
 #endif
 	delta += util;
 	if (delta < 0)
