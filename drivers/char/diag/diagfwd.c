@@ -1256,9 +1256,9 @@ static int diagfwd_mux_close(int id, int mode)
 		driver->md_session_mode == DIAG_MD_NONE) ||
 		(driver->md_session_mode == DIAG_MD_PERIPHERAL)) {
 		/*
-		 * In this case the channel must not be closed. This case
-		 * indicates that the USB is removed but there is a client
-		 * running in background with Memory Device mode
+		 * This case indicates that the USB is removed
+		 * but there is a client running in background
+		 * with Memory Device mode.
 		 */
 	} else {
 		for (i = 0; i < NUM_PERIPHERALS; i++) {
@@ -1267,6 +1267,12 @@ static int diagfwd_mux_close(int id, int mode)
 				diagfwd_close(i, TYPE_CMD);
 			}
 		}
+
+		/*
+		* With clearing of masks on ODL exit and
+		* USB disconnection, closing of the channel is
+		* not needed.This enables read and drop of stale packets.
+		*/
 		/* Re enable HDLC encoding */
 		pr_debug("diag: In %s, re-enabling HDLC encoding\n",
 		       __func__);
